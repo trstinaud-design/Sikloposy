@@ -1,4 +1,4 @@
 window.CYCLOGEST_CONFIG = {
   supabaseUrl: 'https://pklnikedghjtzejckulu.supabase.co',
-  supabaseKey: 'eyJhbGci••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'
+  supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBrbG5pa2VkZ2hqdHplamNrdWx1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ5Njc2MTAsImV4cCI6MjEwMDU0MzYxMH0.9vG5Gglp33TBgNsEM8nhEHznbayAWFxT15CKXSblkJ8'
 };
