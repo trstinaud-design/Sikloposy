@@ -211,7 +211,7 @@ function vehicleFormHTML(v = {}) {
       </div>
     </div>
     <div class="grid sm:grid-cols-2 gap-3">
-      ${field('Numéro / identifiant *', `<input name="code" required value="${esc(v.code || '')}" placeholder="Cyclo #01" class="${INPUT}">`)}
+      ${field('Numéro / identifiant *', `<input name="code" required value="${esc(v.code || (v.id ? '' : Store.vehicles.prochainCode()))}" placeholder="Cyclo #01" class="${INPUT}">`)}
       ${field('État du véhicule', `<select name="status" class="${INPUT}">
         <option value="service" ${!v.status || v.status === 'service' ? 'selected' : ''}>🟢 En service</option>
         <option value="reparation" ${v.status === 'reparation' ? 'selected' : ''}>🟠 En réparation</option>

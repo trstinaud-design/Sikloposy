@@ -416,6 +416,17 @@ const Store = (() => {
     sorted: () => space.vehicles.slice()
       .sort((a, b) => (a.code || '').localeCompare(b.code || '', 'fr', { numeric: true })),
 
+    /* Prochain identifiant automatique « Cyclo #NN ».
+       Lit les numéros existants qui suivent ce schéma, prend le plus grand
+       et renvoie le suivant. Le propriétaire reste libre de le remplacer. */
+    prochainCode() {
+      const max = space.vehicles.reduce((m, v) => {
+        const match = /^Cyclo\s*#(\d+)$/i.exec((v.code || '').trim());
+        return match ? Math.max(m, parseInt(match[1], 10)) : m;
+      }, 0);
+      return `Cyclo #${String(max + 1).padStart(2, '0')}`;
+    },
+
     save(data) {
       if (data.id) {
         const i = space.vehicles.findIndex(v => v.id === data.id);
