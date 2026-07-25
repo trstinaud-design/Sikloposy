@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<meta name="description" content="Gestion de flotte de cyclopousses — versements, dépenses et pannes. Fonctionne hors connexion.">
+<title>SIKLOPOSY — Gestion de flotte de cyclopousses</title>
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/logo.png?v=9">
+<link rel="apple-touch-icon" href="icons/logo.png?v=9">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SIKLOPOSY">
+
+<!-- CSS Tailwind pré-compilé et servi localement : aucune connexion requise,
+     et aucune compilation à l'exécution (24 Ko au lieu de 451 Ko de JavaScript).
+     Pour le régénérer après avoir ajouté des classes : voir README, section « Modifier le style ». -->
+<link rel="stylesheet" href="css/app.css">
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+  .view { display: none; }
+  .view.active { display: block; animation: fade .18s ease; }
+  @keyframes fade { from { opacity:0; transform: translateY(4px);} to {opacity:1; transform:none;} }
+  .nav-link.active { background: #0f766e; color: #fff; }
+  .nav-link.active svg { color: #5eead4; }
+  input, select, textarea { outline: none; }
+  input:focus, select:focus, textarea:focus { border-color:#0d9488; box-shadow: 0 0 0 3px rgba(13,148,136,.15); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+  dialog::backdrop { background: rgba(15,23,42,.55); }
+  dialog { border:none; padding:0; background:transparent; max-height:100dvh; }
+  /* Login : fond plein écran avec voile pour lisibilité */
+  #authView::before {
+    content:''; position:absolute; inset:0;
+    background:url('icons/bg-login.jpg?v=9') center/cover no-repeat;
+    z-index:0;
+  }
+  #authView::after {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(250,245,230,.18) 0%, rgba(15,118,110,.28) 100%);
+    z-index:0;
+  }
+  #authCard { position:relative; z-index:1; }
+  /* Carte en verre depoli : l'illustration doit rester perceptible au travers,
+     sans que le texte ni les champs perdent en lisibilite. Les champs sont
+     eux-memes translucides pour ne pas former des blocs opaques sur la carte. */
+  #authCard input[type="text"], #authCard input[type="email"], #authCard input[type="password"],
+  #pinView input {
+    background-color: rgba(255,255,255,.78);
+    border-color: rgba(255,255,255,.85);
+  }
+  #authCard label, #pinView label { color:#0f172a; }
+  #authCard .text-ink-500, #authCard .text-ink-400, #pinView .text-ink-500 { color:#334155; }
+  /* Fond baobab légèrement flouté pour l'application */
+  body::before {
+    content:''; position:fixed; inset:0;
+    background:url('icons/bg-app.jpg?v=9') center/cover no-repeat;
+    filter:blur(3px) saturate(1.05);
+    transform:scale(1.06);
+    opacity:.55;
+    z-index:-2; pointer-events:none;
+  }
+  body::after {
+    content:''; position:fixed; inset:0;
+    background:rgba(248,250,252,.55);
+    z-index:-1; pointer-events:none;
+  }
+  /* `hidden` doit toujours l'emporter sur les utilitaires d'affichage
+     responsives (`lg:flex` sur #appView), qui sont déclarés plus loin dans
+     la feuille et gagneraient sinon à partir de 1024 px : le tableau de bord
+     s'afficherait alors derrière l'écran de connexion. */
+  #authView.hidden, #appView.hidden, #pinView.hidden { display:none !important; }
+
+  #authView::before, #authView::after, #pinView::before, #pinView::after { z-index:0; }
+  #authView, #pinView { isolation:isolate; }
+  #pinView::before {
+    content:''; position:absolute; inset:0;
+    background:url('icons/bg-login.jpg?v=9') center/cover no-repeat;
+    z-index:0;
+  }
+  #pinView::after {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(250,245,230,.18) 0%, rgba(15,118,110,.28) 100%);
+    z-index:0;
+  }
+  #pinView > * { position:relative; z-index:1; }
+  body.is-auth::before, body.is-auth::after { display:none; }
+  @media print {
+    .no-print, aside, header, nav, dialog, main section.view { display:none !important; }
+    main { padding:0 !important; }
+    #printArea { display:block !important; }
+  }
+</style>
+</head>
+<body class="bg-ink-100 text-ink-800 antialiased is-auth">
+
+<!-- ============ AUTHENTIFICATION ============ -->
+<div id="authView" class="min-h-dvh flex items-center justify-center relative overflow-hidden p-4">
+  <div id="authCard" class="w-full max-w-md bg-white/60 backdrop-blur-lg border border-white/50 rounded-2xl shadow-2xl p-6 sm:p-8">
+    <div class="text-center mb-6">
+      <img src="icons/logo.png?v=9" alt="SIKLOPOSY" class="w-28 h-28 mx-auto mb-2 drop-shadow-lg">
+      <h1 class="text-3xl font-extrabold tracking-tight" style="color:#0f766e">SIKLOPOSY</h1>
+      <p class="text-xs text-ink-500 mt-1">Gestion de flotte de cyclopousses</p>
+    </div>
+
+    <div class="flex gap-2 mb-6 p-1 bg-ink-100 rounded-xl">
+        <button data-authtab="login" class="auth-tab flex-1 py-2 rounded-lg text-sm font-semibold bg-white shadow text-brand-700">Connexion</button>
+        <button data-authtab="register" class="auth-tab flex-1 py-2 rounded-lg text-sm font-semibold text-ink-500">Créer un compte</button>
+      </div>
+
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="block text-sm font-semibold text-ink-700 mb-1.5">Username</label>
+          <div class="relative">
+            <svg class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0"/></svg>
+            <input type="email" name="email" required autocomplete="username" placeholder="Username"
+                   class="w-full pl-10 pr-3.5 py-3 rounded-xl border border-ink-300 text-sm bg-ink-50">
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-ink-700 mb-1.5">Password</label>
+          <div class="relative">
+            <svg class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+            <input type="password" name="password" required autocomplete="current-password" placeholder="Password"
+                   class="w-full pl-10 pr-10 py-3 rounded-xl border border-ink-300 text-sm bg-ink-50">
+            <button type="button" data-toggle-pw class="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/></svg>
+            </button>
+          </div>
+        </div>
+        <label class="flex items-center gap-2 text-sm text-ink-600 cursor-pointer">
+          <input type="checkbox" name="remember" class="rounded border-ink-300 text-brand-700">
+          <span>Se souvenir de moi</span>
+        </label>
+        <p class="text-xs text-red-600 hidden" data-err></p>
+        <button class="w-full py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-semibold text-sm shadow-lg shadow-brand-700/25">Log in</button>
+      </form>
+
+      <form id="registerForm" class="space-y-4 hidden">
+        <div>
+          <label class="block text-sm font-semibold text-ink-700 mb-1.5">Nom du propriétaire / entreprise</label>
+          <input type="text" name="name" required placeholder="Ex : Rakoto Jean"
+                 class="w-full px-3.5 py-3 rounded-xl border border-ink-300 text-sm bg-ink-50">
+        </div>
+        <div>
+          <label class="block text-sm font-semibold text-ink-700 mb-1.5">Adresse email</label>
+          <input type="email" name="email" required autocomplete="username"
+                 class="w-full px-3.5 py-3 rounded-xl border border-ink-300 text-sm bg-ink-50">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-semibold text-ink-700 mb-1.5">Mot de passe</label>
+            <input type="password" name="password" required minlength="6" autocomplete="new-password"
+                   class="w-full px-3.5 py-3 rounded-xl border border-ink-300 text-sm bg-ink-50">
+          </div>
+          <div>
+            <label class="block text-sm font-semibold text-ink-700 mb-1.5">Confirmer</label>
+            <input type="password" name="password2" required minlength="6" autocomplete="new-password"
+                   class="w-full px-3.5 py-3 rounded-xl border border-ink-300 text-sm bg-ink-50">
+          </div>
+        </div>
+        <label class="flex items-start gap-2 text-xs text-ink-600 cursor-pointer">
+          <input type="checkbox" name="demo" class="mt-0.5 rounded border-ink-300 text-brand-700">
+          <span>Pré-remplir avec <b>10 cyclopousses de démonstration</b> et 7 jours d'historique</span>
+        </label>
+        <p class="text-xs text-red-600 hidden" data-err></p>
+        <button class="w-full py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-semibold text-sm shadow-lg shadow-brand-700/25">Créer mon espace</button>
+      </form>
+
+    <p class="text-center text-[11px] text-ink-500 mt-6" id="authMode">Fonctionne hors connexion · données stockées sur cet appareil</p>
+    <p class="text-center text-[11px] text-ink-400 mt-1">By Tinaud TRS</p>
+  </div>
+</div>
+
+<!-- ============ VERROUILLAGE PAR CODE PIN ============ -->
+<div id="pinView" class="hidden min-h-dvh flex items-center justify-center relative overflow-hidden p-4">
+  <div class="w-full max-w-sm bg-white/60 backdrop-blur-lg border border-white/50 rounded-2xl shadow-2xl p-6 sm:p-8">
+    <div class="text-center mb-6">
+      <img src="icons/logo.png?v=9" alt="SIKLOPOSY" class="w-24 h-24 mx-auto mb-2 drop-shadow-lg">
+      <h1 class="text-2xl font-extrabold tracking-tight" style="color:#0f766e">SIKLOPOSY</h1>
+      <p class="text-xs text-ink-500 mt-1" id="pinEmail">—</p>
+    </div>
+
+    <form id="pinForm" class="space-y-4">
+      <div>
+        <label class="block text-sm font-semibold text-ink-700 mb-2 text-center">Entrez votre code PIN</label>
+        <input type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" name="code" required
+               class="w-full text-center text-2xl tracking-[0.5em] font-bold py-3.5 rounded-xl border-2 border-ink-300 bg-white"
+               autocomplete="off" autofocus>
+      </div>
+      <p class="text-xs text-red-600 hidden text-center" data-err></p>
+      <button class="w-full py-3 rounded-xl bg-brand-700 hover:bg-brand-800 text-white font-semibold text-sm shadow-lg shadow-brand-700/25">Déverrouiller</button>
+      <button type="button" id="pinChangeUser" class="w-full py-2 text-xs text-ink-500 hover:text-ink-800">
+        Changer d'utilisateur / se reconnecter avec mot de passe
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ APPLICATION ============ -->
+<div id="appView" class="hidden min-h-dvh lg:flex">
+
+  <aside class="hidden lg:flex lg:flex-col w-64 shrink-0 bg-ink-900 text-ink-300 p-4 sticky top-0 h-dvh">
+    <div class="flex items-center gap-2.5 px-2 py-3 mb-4">
+      <img src="icons/logo.png?v=9" alt="" class="w-10 h-10 rounded-xl">
+      <div class="min-w-0">
+        <p class="text-white font-bold leading-tight">SIKLOPOSY</p>
+        <p class="text-[11px] text-ink-400 truncate" id="sideOwner">—</p>
+      </div>
+    </div>
+    <nav class="flex-1 space-y-1" id="sideNav"></nav>
+    <button id="installBtn" class="hidden mb-2 flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold bg-brand-700 text-white hover:bg-brand-600">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V3m0 13.5-4-4m4 4 4-4M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5"/></svg>
+      Installer l'application
+    </button>
+    <button id="logoutBtn" class="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm text-ink-400 hover:text-white hover:bg-white/5">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l3 3m0 0-3 3m3-3H2.25"/></svg>
+      Déconnexion
+    </button>
+  </aside>
+
+  <div class="flex-1 min-w-0 flex flex-col">
+    <header class="sticky top-0 z-30 bg-white/90 backdrop-blur border-b border-ink-200">
+      <div class="px-4 lg:px-8 py-3 flex items-center gap-3">
+        <img src="icons/logo.png?v=9" alt="" class="lg:hidden w-9 h-9 rounded-lg shrink-0">
+        <div class="min-w-0 flex-1">
+          <h2 class="font-bold text-ink-900 truncate leading-tight" id="pageTitle">Tableau de bord</h2>
+          <p class="text-[11px] text-ink-500 truncate" id="pageSub">—</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="offlineBadge" class="hidden items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 text-amber-800 text-[10px] font-black">● HORS LIGNE</span>
+          <input type="date" id="globalDate" class="px-2.5 py-2 rounded-xl border border-ink-300 text-xs font-semibold bg-white">
+          <button id="quickAdd" class="hidden sm:flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-xs font-bold shadow-lg shadow-brand-700/20">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Versement
+          </button>
+          <button id="settingsBtnM" data-nav="parametres" class="lg:hidden p-2 rounded-xl border border-ink-300 text-ink-500" title="Paramètres">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10.3 4.3a1.7 1.7 0 0 1 3.4 0l.2 1a7.5 7.5 0 0 1 1.8 1l1-.4a1.7 1.7 0 0 1 2 2.4l-.5.9c.2.6.4 1.2.4 1.8s-.2 1.2-.4 1.8l.5.9a1.7 1.7 0 0 1-2 2.4l-1-.4a7.5 7.5 0 0 1-1.8 1l-.2 1a1.7 1.7 0 0 1-3.4 0l-.2-1a7.5 7.5 0 0 1-1.8-1l-1 .4a1.7 1.7 0 0 1-2-2.4l.5-.9A6 6 0 0 1 5.4 12c0-.6.2-1.2.4-1.8l-.5-.9a1.7 1.7 0 0 1 2-2.4l1 .4c.5-.4 1.1-.8 1.8-1zM14.5 12a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z"/></svg>
+          </button>
+          <button id="logoutBtnM" class="lg:hidden p-2 rounded-xl border border-ink-300 text-ink-500">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l3 3m0 0-3 3m3-3H2.25"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1 p-4 lg:p-8 pb-24 lg:pb-8 max-w-[1400px] w-full mx-auto">
+
+      <!-- ===== DASHBOARD ===== -->
+      <section id="view-dashboard" class="view active space-y-5">
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 lg:gap-4" id="kpiGrid"></div>
+
+        <!-- min-w-0 : sans lui, un élément de grille refuse de rétrécir sous la
+             largeur de son contenu et fait déborder la page sur téléphone. -->
+        <div class="grid lg:grid-cols-3 gap-4">
+          <div class="lg:col-span-2 min-w-0 space-y-4">
+            <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+              <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
+                <h3 class="font-bold text-sm flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-red-500"></span> Non versés — action requise
+                </h3>
+                <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700" id="unpaidCount">0</span>
+              </div>
+              <div id="unpaidList" class="divide-y divide-ink-100 max-h-[420px] overflow-y-auto"></div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+              <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
+                <h3 class="font-bold text-sm flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500"></span> Versements encaissés
+                </h3>
+                <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700" id="paidCount">0</span>
+              </div>
+              <div id="paidList" class="divide-y divide-ink-100 max-h-[420px] overflow-y-auto"></div>
+            </div>
+          </div>
+
+          <div class="min-w-0 space-y-4">
+            <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+              <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
+                <h3 class="font-bold text-sm">⏸️ Pousses improductifs</h3>
+                <span class="text-xs font-bold px-2 py-0.5 rounded-full bg-ink-200 text-ink-600" id="idleCount">0</span>
+              </div>
+              <div id="idleList" class="divide-y divide-ink-100"></div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+              <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between">
+                <h3 class="font-bold text-sm">💸 Dépenses du jour</h3>
+                <button data-open="expense" class="text-xs font-bold text-brand-700 hover:underline">+ Ajouter</button>
+              </div>
+              <div id="expenseTodayList" class="divide-y divide-ink-100 max-h-72 overflow-y-auto"></div>
+            </div>
+
+            <div class="bg-white rounded-2xl border border-ink-200 p-4">
+              <h3 class="font-bold text-sm mb-3">📈 7 derniers jours</h3>
+              <div id="sparkChart"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== SAISIE DU JOUR ===== -->
+      <section id="view-saisie" class="view space-y-5">
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div class="bg-white rounded-2xl border border-ink-200 p-5">
+            <h3 class="font-bold mb-1">💰 Versement quotidien</h3>
+            <p class="text-xs text-ink-500 mb-4">Recette remise pour un cyclopousse.</p>
+            <form id="paymentFormInline" class="space-y-3"></form>
+          </div>
+          <div class="bg-white rounded-2xl border border-ink-200 p-5">
+            <h3 class="font-bold mb-1">🔧 Dépense / Panne</h3>
+            <p class="text-xs text-ink-500 mb-4">Toute sortie d'argent liée à un cyclopousse.</p>
+            <form id="expenseFormInline" class="space-y-3"></form>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-2">
+            <h3 class="font-bold text-sm">📋 Feuille de route du jour</h3>
+            <button id="markAllPaid" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100">Tout marquer payé (montant attendu)</button>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
+                <tr>
+                  <th class="text-left px-4 py-2.5 font-semibold">Cyclopousse</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Chauffeur du jour</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Attendu</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Versé</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Écart</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Dépenses</th>
+                  <th class="text-center px-4 py-2.5 font-semibold">Statut</th>
+                  <th class="px-4 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody id="dayTableBody" class="divide-y divide-ink-100"></tbody>
+              <tfoot class="bg-ink-50 font-bold text-sm" id="dayTableFoot"></tfoot>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== CYCLOPOUSSES ===== -->
+      <section id="view-pousses" class="view space-y-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" id="fleetKpi"></div>
+
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="relative flex-1 min-w-[200px]">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="m21 21-4.35-4.35M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>
+            <input id="vehicleSearch" placeholder="Rechercher un n° de pousse ou un chauffeur…" class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-ink-300 text-sm bg-white">
+          </div>
+          <select id="vehicleFilter" class="px-3 py-2.5 rounded-xl border border-ink-300 text-sm bg-white font-semibold">
+            <option value="">Tous les pousses</option>
+            <option value="service">🟢 En service</option>
+            <option value="reparation">🟠 En réparation</option>
+            <option value="immobilise">🔴 Immobilisés</option>
+            <option value="libre">👤 Sans chauffeur</option>
+          </select>
+          <button data-open="vehicle" class="px-4 py-2.5 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold shadow-lg shadow-brand-700/20 whitespace-nowrap">+ Nouveau cyclopousse</button>
+        </div>
+
+        <div id="vehicleGrid" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </section>
+
+      <!-- ===== CHAUFFEURS ===== -->
+      <section id="view-chauffeurs" class="view space-y-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="relative flex-1 min-w-[200px]">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-ink-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="m21 21-4.35-4.35M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"/></svg>
+            <input id="driverSearch" placeholder="Rechercher un chauffeur, CIN, téléphone…" class="w-full pl-9 pr-3 py-2.5 rounded-xl border border-ink-300 text-sm bg-white">
+          </div>
+          <select id="driverFilter" class="px-3 py-2.5 rounded-xl border border-ink-300 text-sm bg-white font-semibold">
+            <option value="">Tous les chauffeurs</option>
+            <option value="actif">Actifs</option>
+            <option value="inactif">Inactifs</option>
+            <option value="sanspousse">Sans cyclopousse</option>
+          </select>
+          <button data-open="driver" class="px-4 py-2.5 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold shadow-lg shadow-brand-700/20 whitespace-nowrap">+ Nouveau chauffeur</button>
+        </div>
+        <div id="driverGrid" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-4"></div>
+      </section>
+
+      <!-- ===== CAISSE / COFFRE ===== -->
+      <section id="view-caisse" class="view space-y-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" id="cashKpi"></div>
+
+        <div class="grid lg:grid-cols-3 gap-4">
+          <div class="min-w-0 bg-white rounded-2xl border border-ink-200 p-5">
+            <h3 class="font-bold text-sm mb-3">🧮 D'où vient le solde</h3>
+            <div id="cashBreakdown"></div>
+            <button data-open="movement" class="w-full mt-4 py-2.5 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold">+ Retrait / Apport</button>
+          </div>
+
+          <div class="lg:col-span-2 min-w-0 bg-white rounded-2xl border border-ink-200 p-5">
+            <h3 class="font-bold text-sm mb-1">📤 Où part l'argent</h3>
+            <p class="text-xs text-ink-500 mb-4">Retraits par motif, <span id="cashPeriodLabel">—</span></p>
+            <div id="withdrawChart"></div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-2">
+            <h3 class="font-bold text-sm">📒 Registre de caisse</h3>
+            <div class="flex flex-wrap gap-1 p-1 bg-ink-100 rounded-xl">
+              <button data-cash-filter="" class="cash-filter px-3 py-1.5 rounded-lg text-xs font-bold">Tout</button>
+              <button data-cash-filter="versement" class="cash-filter px-3 py-1.5 rounded-lg text-xs font-bold">Versements</button>
+              <button data-cash-filter="reparation" class="cash-filter px-3 py-1.5 rounded-lg text-xs font-bold">Réparations</button>
+              <button data-cash-filter="retrait" class="cash-filter px-3 py-1.5 rounded-lg text-xs font-bold">Retraits</button>
+              <button data-cash-filter="apport" class="cash-filter px-3 py-1.5 rounded-lg text-xs font-bold">Apports</button>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
+                <tr>
+                  <th class="text-left px-4 py-2.5 font-semibold">Date</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Genre</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Motif</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Détail</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Montant</th>
+                  <th class="px-4 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody id="cashLedgerBody" class="divide-y divide-ink-100"></tbody>
+              <tfoot class="bg-ink-50 font-bold text-sm" id="cashLedgerFoot"></tfoot>
+            </table>
+          </div>
+          <p class="px-4 py-2.5 text-[11px] text-ink-400 border-t border-ink-100">
+            La période affichée est celle choisie dans l'onglet Historique. Les versements et réparations sont repris automatiquement — seuls les retraits et apports se saisissent ici.
+          </p>
+        </div>
+      </section>
+
+      <!-- ===== MAINTENANCE ===== -->
+      <section id="view-maintenance" class="view space-y-4">
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" id="maintKpi"></div>
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div class="bg-white rounded-2xl border border-ink-200 p-5">
+            <h3 class="font-bold text-sm mb-4">🏷️ Répartition par type de panne</h3>
+            <div id="catChart"></div>
+          </div>
+          <div class="bg-white rounded-2xl border border-ink-200 p-5">
+            <h3 class="font-bold text-sm mb-4">🚨 Cyclopousses les plus coûteux</h3>
+            <div id="worstVehicles"></div>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-ink-100 flex items-center justify-between flex-wrap gap-2">
+            <h3 class="font-bold text-sm">📜 Historique complet des pannes</h3>
+            <div class="flex flex-wrap gap-2">
+              <select id="maintVehicleFilter" class="px-3 py-1.5 rounded-lg border border-ink-300 text-xs bg-white font-semibold"></select>
+              <select id="maintCatFilter" class="px-3 py-1.5 rounded-lg border border-ink-300 text-xs bg-white font-semibold"></select>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-ink-50 text-[11px] uppercase tracking-wide text-ink-500">
+                <tr>
+                  <th class="text-left px-4 py-2.5 font-semibold">Date</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Cyclopousse</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Catégorie</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Description</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Réparateur</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Montant</th>
+                  <th class="px-4 py-2.5"></th>
+                </tr>
+              </thead>
+              <tbody id="maintTableBody" class="divide-y divide-ink-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== HISTORIQUE ===== -->
+      <section id="view-historique" class="view space-y-4">
+        <div class="bg-white rounded-2xl border border-ink-200 p-4 flex flex-wrap items-end gap-3">
+          <div>
+            <label class="block text-[11px] font-bold text-ink-500 mb-1">Période</label>
+            <div class="flex flex-wrap gap-1 p-1 bg-ink-100 rounded-xl">
+              <button data-period="jour" class="period-btn px-3 py-1.5 rounded-lg text-xs font-bold">Aujourd'hui</button>
+              <button data-period="semaine" class="period-btn px-3 py-1.5 rounded-lg text-xs font-bold">Semaine</button>
+              <button data-period="mois" class="period-btn px-3 py-1.5 rounded-lg text-xs font-bold">Mois</button>
+              <button data-period="annee" class="period-btn px-3 py-1.5 rounded-lg text-xs font-bold">Année</button>
+              <button data-period="tout" class="period-btn px-3 py-1.5 rounded-lg text-xs font-bold">Tout</button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-ink-500 mb-1">Du</label>
+            <input type="date" id="histFrom" class="px-3 py-2 rounded-xl border border-ink-300 text-sm">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-ink-500 mb-1">Au</label>
+            <input type="date" id="histTo" class="px-3 py-2 rounded-xl border border-ink-300 text-sm">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-ink-500 mb-1">Regrouper par</label>
+            <select id="histGroup" class="px-3 py-2 rounded-xl border border-ink-300 text-sm font-semibold bg-white">
+              <option value="day">Jour</option>
+              <option value="week">Semaine</option>
+              <option value="month">Mois</option>
+              <option value="year">Année</option>
+            </select>
+          </div>
+          <div class="flex gap-2 ml-auto">
+            <button id="exportCsv" class="px-3 py-2 rounded-xl border border-ink-300 text-xs font-bold hover:bg-ink-50">⬇ Export CSV</button>
+            <button id="printBtn" class="px-3 py-2 rounded-xl border border-ink-300 text-xs font-bold hover:bg-ink-50">🖨 Imprimer</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3" id="histKpi"></div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold text-sm mb-4">Évolution de la recette nette</h3>
+          <div id="histChart"></div>
+        </div>
+
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-ink-100"><h3 class="font-bold text-sm">📆 Détail par période</h3></div>
+            <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-ink-50 text-[11px] uppercase text-ink-500 sticky top-0">
+                  <tr>
+                    <th class="text-left px-4 py-2.5 font-semibold">Période</th>
+                    <th class="text-right px-4 py-2.5 font-semibold">Versements</th>
+                    <th class="text-right px-4 py-2.5 font-semibold">Dépenses</th>
+                    <th class="text-right px-4 py-2.5 font-semibold">Net</th>
+                  </tr>
+                </thead>
+                <tbody id="histTableBody" class="divide-y divide-ink-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+            <div class="px-4 py-3 border-b border-ink-100"><h3 class="font-bold text-sm">🚲 Rendement par cyclopousse</h3></div>
+            <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+              <table class="w-full text-sm">
+                <thead class="bg-ink-50 text-[11px] uppercase text-ink-500 sticky top-0">
+                  <tr>
+                    <th class="text-left px-4 py-2.5 font-semibold">Pousse</th>
+                    <th class="text-right px-4 py-2.5 font-semibold">Encaissé</th>
+                    <th class="text-right px-4 py-2.5 font-semibold">Pannes</th>
+                    <th class="text-right px-4 py-2.5 font-semibold">Net</th>
+                  </tr>
+                </thead>
+                <tbody id="histVehicleBody" class="divide-y divide-ink-100"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 overflow-hidden">
+          <div class="px-4 py-3 border-b border-ink-100"><h3 class="font-bold text-sm">👤 Bilan individuel par chauffeur</h3></div>
+          <div class="overflow-x-auto max-h-[400px] overflow-y-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-ink-50 text-[11px] uppercase text-ink-500 sticky top-0">
+                <tr>
+                  <th class="text-left px-4 py-2.5 font-semibold">Chauffeur</th>
+                  <th class="text-left px-4 py-2.5 font-semibold">Pousse actuel</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Versé</th>
+                  <th class="text-center px-4 py-2.5 font-semibold">Jours conduits</th>
+                  <th class="text-center px-4 py-2.5 font-semibold">Jours impayés</th>
+                  <th class="text-right px-4 py-2.5 font-semibold">Fiabilité</th>
+                </tr>
+              </thead>
+              <tbody id="histDriverBody" class="divide-y divide-ink-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== PARAMETRES ===== -->
+      <section id="view-parametres" class="view space-y-4 max-w-3xl">
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold mb-4">⚙️ Paramètres généraux</h3>
+          <form id="settingsForm" class="space-y-4">
+            <div class="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-ink-600 mb-1.5">Devise (symbole)</label>
+                <input name="currency" class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-ink-600 mb-1.5">Versement attendu par pousse et par jour</label>
+                <input name="dailyTarget" type="number" min="0" step="100" class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm">
+              </div>
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-ink-600 mb-1.5">Nom du propriétaire / entreprise</label>
+              <input name="ownerName" class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-ink-600 mb-1.5">Langue / Fiteny</label>
+              <select name="lang" class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm bg-white font-semibold">
+                <option value="fr">Français</option>
+                <option value="mg">Malagasy</option>
+              </select>
+            </div>
+            <label class="flex items-start gap-2 text-sm text-ink-700 cursor-pointer">
+              <input type="checkbox" name="strictTarget" class="mt-0.5 rounded border-ink-300 text-brand-700">
+              <span>Ne compter dans l'objectif du jour que les pousses <b>en service et avec un chauffeur actif</b>
+                <span class="block text-xs text-ink-500">Un pousse en réparation ou sans chauffeur n'est alors pas compté comme « reste à encaisser ».</span>
+              </span>
+            </label>
+            <button class="px-5 py-2.5 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold">Enregistrer</button>
+          </form>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold mb-1">🔒 Code PIN de déverrouillage rapide</h3>
+          <p class="text-xs text-ink-500 mb-4">Ouvrez l'application par un code à 4 chiffres au lieu de retaper votre e-mail et votre mot de passe.</p>
+          <div id="pinState" class="mb-3 p-3 rounded-xl text-sm"></div>
+          <form id="pinConfigForm" class="grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
+            <div>
+              <label class="block text-xs font-semibold text-ink-600 mb-1.5">Nouveau PIN (4 à 8 chiffres)</label>
+              <input name="code" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required
+                     class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm tracking-widest">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-ink-600 mb-1.5">Confirmer</label>
+              <input name="code2" type="password" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" required
+                     class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm tracking-widest">
+            </div>
+            <button class="px-4 py-2.5 rounded-xl bg-brand-700 hover:bg-brand-800 text-white text-sm font-bold whitespace-nowrap">Enregistrer</button>
+          </form>
+          <p class="text-xs text-red-600 hidden mt-2" id="pinConfigErr"></p>
+          <button id="pinRemoveBtn" class="hidden mt-3 text-xs text-red-600 hover:underline">Supprimer le code PIN</button>
+          <button id="pinLockNowBtn" class="hidden mt-3 ml-4 text-xs text-ink-600 hover:underline">Verrouiller maintenant</button>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold mb-1">💾 Sauvegarde &amp; restauration</h3>
+          <p class="text-xs text-ink-500 mb-4">Vos données vivent dans ce navigateur. <b>Un fichier rangé ailleurs est votre seule protection réelle</b> contre une perte du téléphone.</p>
+
+          <div id="backupState" class="mb-4 p-3 rounded-xl text-sm"></div>
+
+          <div class="mb-4">
+            <label class="block text-xs font-semibold text-ink-600 mb-1.5">Envoyer les sauvegardes à cette adresse</label>
+            <div class="flex gap-2">
+              <input id="backupEmail" type="email" placeholder="proprietaire@exemple.mg" class="flex-1 px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm">
+              <button id="saveEmailBtn" class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">Mémoriser</button>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button id="emailBackupBtn" class="px-4 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-bold hover:bg-brand-800">📧 Sauvegarder par e-mail</button>
+            <button id="backupBtn" class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">⬇ Enregistrer le fichier</button>
+            <label class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50 cursor-pointer">
+              ⬆ Restaurer une sauvegarde
+              <input type="file" id="restoreInput" accept="application/json" class="hidden">
+            </label>
+            <button id="seedBtn" class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">🎲 Charger les données de démo</button>
+          </div>
+          <p class="mt-3 text-[11px] text-ink-400">
+            Sur téléphone, « Sauvegarder par e-mail » ouvre le menu de partage : choisissez Gmail, WhatsApp ou Drive.
+            Sur ordinateur, le fichier est enregistré puis votre logiciel de messagerie s'ouvre — il ne reste qu'à joindre le fichier.
+          </p>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold mb-1">☁️ Synchronisation en ligne</h3>
+          <p class="text-xs text-ink-500 mb-4">
+            Sauvegarde automatique sur un serveur, sans limite de taille, et accès depuis
+            plusieurs appareils. <b>Facultatif</b> : sans cela, l'application continue de
+            fonctionner entièrement hors ligne. Voir le README pour créer le projet gratuit (5 min).
+          </p>
+
+          <div id="syncState" class="mb-4 p-3 rounded-xl text-sm"></div>
+
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-ink-600 mb-1.5">Adresse du projet</label>
+              <input id="syncUrl" type="url" placeholder="https://xxxxxxxx.supabase.co" class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-ink-600 mb-1.5">Clé publique « anon »</label>
+              <input id="syncKey" type="password" placeholder="eyJhbGciOi…" class="w-full px-3.5 py-2.5 rounded-xl border border-ink-300 text-sm">
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2 mt-4">
+            <button id="syncTestBtn" class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">🔌 Tester la connexion</button>
+            <button id="syncSaveBtn" class="px-4 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-bold hover:bg-brand-800">Enregistrer</button>
+            <button id="syncNowBtn" class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">🔄 Synchroniser maintenant</button>
+          </div>
+
+          <div id="importLocalBloc" class="hidden mt-4 p-3 rounded-xl bg-amber-50 border border-amber-200">
+            <p class="text-xs text-amber-900 mb-2"><b>Données d'un ancien compte local détectées</b> sur cet appareil. Voulez-vous les reprendre dans ce compte en ligne ?</p>
+            <div id="importLocalListe" class="space-y-2"></div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold mb-1">🛟 Copie de secours interne</h3>
+          <p class="text-xs text-ink-500 mb-3">Une copie est conservée séparément dans l'appareil à chaque enregistrement. Elle protège d'une corruption des données, <b>pas</b> d'un effacement du navigateur.</p>
+          <div class="flex flex-wrap gap-2 items-center">
+            <button id="restoreLocalBtn" class="px-4 py-2.5 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">↩ Restaurer la copie de secours</button>
+            <span id="localCopyState" class="text-xs text-ink-500"></span>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-ink-200 p-5">
+          <h3 class="font-bold mb-1">📶 Fonctionnement hors connexion</h3>
+          <p class="text-xs text-ink-500 mb-3" id="swStatus">Vérification…</p>
+          <div id="storageStatus" class="p-3 rounded-xl text-sm mb-3"></div>
+          <button id="installBtn2" class="hidden px-4 py-2.5 rounded-xl bg-brand-700 text-white text-sm font-bold">📲 Installer sur cet appareil</button>
+        </div>
+
+        <div class="bg-white rounded-2xl border border-red-200 p-5">
+          <h3 class="font-bold text-red-700 mb-1">⚠️ Zone dangereuse</h3>
+          <p class="text-xs text-ink-500 mb-4">Ces actions sont irréversibles.</p>
+          <div class="flex flex-wrap gap-2">
+            <button id="wipeOpsBtn" class="px-4 py-2.5 rounded-xl border border-red-300 text-sm font-bold text-red-700 hover:bg-red-50">Effacer versements &amp; dépenses</button>
+            <button id="wipeAllBtn" class="px-4 py-2.5 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700">Supprimer tout mon espace</button>
+          </div>
+        </div>
+
+        <p class="text-center text-[11px] text-ink-400 pb-4">SIKLOPOSY v2.0 — by Tinaud TRS</p>
+      </section>
+
+      <div id="printArea" class="hidden"></div>
+    </main>
+
+    <nav class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-ink-200 grid pb-[env(safe-area-inset-bottom)]" id="bottomNav"></nav>
+
+    <button id="fab" class="sm:hidden fixed right-4 bottom-20 z-30 w-14 h-14 rounded-full bg-brand-700 text-white shadow-xl shadow-brand-700/40 grid place-items-center">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- ============ MODALES ============ -->
+<dialog id="modalVehicle" class="w-full max-w-2xl">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold" id="modalVehicleTitle">Nouveau cyclopousse</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <form id="vehicleForm" class="p-5 overflow-y-auto space-y-4"></form>
+  </div>
+</dialog>
+
+<dialog id="modalAssign" class="w-full max-w-lg">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold" id="modalAssignTitle">Changer de chauffeur</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <form id="assignForm" class="p-5 overflow-y-auto space-y-4"></form>
+  </div>
+</dialog>
+
+<dialog id="modalDriver" class="w-full max-w-2xl">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold" id="modalDriverTitle">Nouveau chauffeur</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <form id="driverForm" class="p-5 overflow-y-auto space-y-4"></form>
+  </div>
+</dialog>
+
+<dialog id="modalPayment" class="w-full max-w-lg">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold">💰 Enregistrer un versement</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <form id="paymentForm" class="p-5 overflow-y-auto space-y-4"></form>
+  </div>
+</dialog>
+
+<dialog id="modalExpense" class="w-full max-w-lg">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold">🔧 Enregistrer une dépense / panne</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <form id="expenseForm" class="p-5 overflow-y-auto space-y-4"></form>
+  </div>
+</dialog>
+
+<dialog id="modalDetail" class="w-full max-w-3xl">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold" id="detailTitle">Fiche</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <div id="detailBody" class="p-5 overflow-y-auto"></div>
+  </div>
+</dialog>
+
+<dialog id="modalMovement" class="w-full max-w-lg">
+  <div class="bg-white rounded-2xl w-full max-h-[92dvh] flex flex-col">
+    <div class="px-5 py-4 border-b border-ink-100 flex items-center justify-between shrink-0">
+      <h3 class="font-bold" id="modalMovementTitle">💰 Mouvement de coffre</h3>
+      <button data-close class="p-1.5 rounded-lg hover:bg-ink-100 text-ink-500">✕</button>
+    </div>
+    <form id="movementForm" class="p-5 overflow-y-auto space-y-4"></form>
+  </div>
+</dialog>
+
+<dialog id="modalConfirm" class="w-full max-w-sm">
+  <div class="bg-white rounded-2xl p-5">
+    <h3 class="font-bold mb-1" id="confirmTitle">Confirmer</h3>
+    <p class="text-sm text-ink-600 mb-5" id="confirmMsg">Êtes-vous sûr ?</p>
+    <div class="flex gap-2 justify-end">
+      <button data-close class="px-4 py-2 rounded-xl border border-ink-300 text-sm font-bold hover:bg-ink-50">Annuler</button>
+      <button id="confirmOk" class="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-bold hover:bg-red-700">Confirmer</button>
+    </div>
+  </div>
+</dialog>
+
+<div id="toastHost" class="fixed z-[60] bottom-24 lg:bottom-6 right-4 left-4 sm:left-auto sm:w-80 space-y-2 pointer-events-none"></div>
+
+<script src="js/config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/sync.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/views.js"></script>
+<script src="js/views2.js"></script>
+<script src="js/views3.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
