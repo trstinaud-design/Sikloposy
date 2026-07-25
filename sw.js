@@ -5,7 +5,7 @@
    l'installation, et servis depuis le cache ensuite. Le réseau ne sert qu'à
    rafraîchir le cache en arrière-plan.
    ========================================================================= */
-const CACHE = 'sikloposy-v10';
+const CACHE = 'sikloposy-v11';
 
 const ASSETS = [
   './',
